@@ -18,17 +18,17 @@ use indicatif::{ProgressBar, ProgressStyle};
 #[cfg(feature = "std")]
 use std::time::Instant;
 
+pub mod erase_plan;
+pub mod id;
 pub mod sfdp;
 pub mod sreg;
-pub mod id;
-pub mod erase_plan;
 
+pub use id::FlashID;
 pub use sfdp::{FlashParams, SFDPAddressBytes, SFDPEraseInst, SFDPStatus1Volatility, SFDPTiming};
 pub use sreg::{StatusRegister1, StatusRegister2, StatusRegister3};
-pub use id::FlashID;
 
-use sfdp::SFDPHeader;
 use erase_plan::ErasePlan;
+use sfdp::SFDPHeader;
 
 #[cfg(feature = "std")]
 #[derive(thiserror::Error, Debug)]
@@ -268,7 +268,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
         }
 
         let id = FlashID {
-            manufacturer_bank, manufacturer_id, device_id_short, device_id_long, unique_id
+            manufacturer_bank,
+            manufacturer_id,
+            device_id_short,
+            device_id_long,
+            unique_id,
         };
 
         log::debug!("Read ID: {:?}", id);
@@ -302,7 +306,7 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
         // since not all flash devices support SFDP.
         // After this parse is successful, however, subsequent errors
         // are returned as errors.
-        let data = self.read_sfdp(0, 8 + nph*8)?;
+        let data = self.read_sfdp(0, 8 + nph * 8)?;
         let header = match SFDPHeader::from_bytes(&data) {
             Ok(header) => header,
             Err(_) => return Ok(None),
@@ -340,10 +344,17 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
             self.erase_opcode = params.legacy_4kb_erase_inst;
         }
         log::debug!("Updated settings from parameters:");
-        log::debug!("Address bytes: {}, capacity: {:?} bytes",
-                    self.address_bytes, self.capacity);
-        log::debug!("Page size: {:?}, erase size: {:?}, erase op: {}",
-                    self.page_size, self.erase_size, self.erase_opcode);
+        log::debug!(
+            "Address bytes: {}, capacity: {:?} bytes",
+            self.address_bytes,
+            self.capacity
+        );
+        log::debug!(
+            "Page size: {:?}, erase size: {:?}, erase op: {}",
+            self.page_size,
+            self.erase_size,
+            self.erase_opcode
+        );
 
         Ok(Some(params))
     }
@@ -378,9 +389,7 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     ///
     /// While `read()` performs a single long SPI exchange, this method performs
     /// up to 128 separate SPI exchanges to allow progress to be reported.
-    pub fn read_cb<F: Fn(usize)>(&mut self, address: u32, length: usize, cb: F)
-        -> Result<Vec<u8>>
-    {
+    pub fn read_cb<F: Fn(usize)>(&mut self, address: u32, length: usize, cb: F) -> Result<Vec<u8>> {
         self.check_address_length(address, length)?;
         let chunk_size = usize::max(1024, length / 128);
         let start = address as usize;
@@ -407,8 +416,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     /// up to 128 separate SPI exchanges to allow progress to be reported.
     #[cfg(feature = "std")]
     pub fn read_progress(&mut self, address: u32, length: usize) -> Result<Vec<u8>> {
-        let pb = ProgressBar::new(length as u64).with_style(ProgressStyle::default_bar()
-            .template(Self::DATA_PROGRESS_TPL).progress_chars(Self::DATA_PROGRESS_CHARS));
+        let pb = ProgressBar::new(length as u64).with_style(
+            ProgressStyle::default_bar()
+                .template(Self::DATA_PROGRESS_TPL)
+                .progress_chars(Self::DATA_PROGRESS_CHARS),
+        );
         pb.set_message("Reading");
         let result = self.read_cb(address, length, |n| pb.set_position(n as u64));
         pb.finish();
@@ -440,9 +452,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     pub fn erase_progress(&mut self) -> Result<()> {
         let time = self.params.map(|p| p.timing.map(|t| t.chip_erase_time_typ));
         let pb = if let Some(Some(time)) = time {
-            ProgressBar::new(time.as_millis() as u64).with_style(ProgressStyle::default_bar()
+            ProgressBar::new(time.as_millis() as u64).with_style(
+                ProgressStyle::default_bar()
                     .template(" {msg} [{bar:40}] {elapsed} < {eta}")
-            .progress_chars("=> "))
+                    .progress_chars("=> "),
+            )
         } else {
             ProgressBar::new_spinner()
         };
@@ -574,7 +588,12 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     /// the SFDP parameters are used to determine the correct
     /// non-volatile instruction.
     pub fn protect(&mut self, bp0: bool, bp1: bool, bp2: bool) -> Result<()> {
-        log::debug!("Setting block protection bits to BP0={}, BP1={}, BP2={}", bp0, bp1, bp2);
+        log::debug!(
+            "Setting block protection bits to BP0={}, BP1={}, BP2={}",
+            bp0,
+            bp1,
+            bp2
+        );
         let mut status1 = self.read_status1()?;
         status1.set_block_protect(bp0, bp1, bp2);
         self.write_status1(status1)?;
@@ -649,8 +668,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     /// use `program()` for a higher-level erase-program-verify interface.
     #[cfg(feature = "std")]
     pub fn program_data_progress(&mut self, address: u32, data: &[u8]) -> Result<()> {
-        let pb = ProgressBar::new(data.len() as u64).with_style(ProgressStyle::default_bar()
-            .template(Self::DATA_PROGRESS_TPL).progress_chars(Self::DATA_PROGRESS_CHARS));
+        let pb = ProgressBar::new(data.len() as u64).with_style(
+            ProgressStyle::default_bar()
+                .template(Self::DATA_PROGRESS_TPL)
+                .progress_chars(Self::DATA_PROGRESS_CHARS),
+        );
         pb.set_message("Writing");
         self.program_data_cb(address, &data, |n| pb.set_position(n as u64))?;
         pb.finish();
@@ -664,9 +686,12 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     ///
     /// Calls `cb` with the number of bytes programmed so far after each
     /// page programming operation.
-    pub fn program_data_cb<F: Fn(usize)>(&mut self, address: u32, mut data: &[u8], cb: F)
-        -> Result<()>
-    {
+    pub fn program_data_cb<F: Fn(usize)>(
+        &mut self,
+        address: u32,
+        mut data: &[u8],
+        cb: F,
+    ) -> Result<()> {
         let page_size = match self.page_size {
             Some(page_size) => page_size,
             None => {
@@ -676,7 +701,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
             }
         };
 
-        log::trace!("Programming data to 0x{:08X}, page size {} bytes", address, page_size);
+        log::trace!(
+            "Programming data to 0x{:08X}, page size {} bytes",
+            address,
+            page_size
+        );
 
         let mut total_bytes = 0;
         cb(total_bytes);
@@ -750,7 +779,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
             let data = self.exchange(Command::ReadJEDECID, &[], 16)?;
             for n in 1..=13 {
                 if data[n] != 0x7F {
-                    return Ok((n as u8, data[n], u16::from_be_bytes([data[n+1], data[n+2]])));
+                    return Ok((
+                        n as u8,
+                        data[n],
+                        u16::from_be_bytes([data[n + 1], data[n + 2]]),
+                    ));
                 }
             }
             log::error!("Found more than 11 continuation bytes in manufacturer ID");
@@ -776,7 +809,7 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
             let data = self.exchange(Command::ReadJEDECID, &[0, 0, 0], 15)?;
             for n in 1..=13 {
                 if data[n] != 0x7F {
-                    return Ok((n as u8, data[n], data[n+1]))
+                    return Ok((n as u8, data[n], data[n + 1]));
                 }
             }
             log::error!("Found more than 11 continuation bytes in manufacturer ID");
@@ -792,7 +825,8 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
 
     /// Read status register 1.
     pub fn read_status1(&mut self) -> Result<StatusRegister1> {
-        self.exchange(Command::ReadStatusRegister1, &[], 1).map(|data| StatusRegister1(data[0]))
+        self.exchange(Command::ReadStatusRegister1, &[], 1)
+            .map(|data| StatusRegister1(data[0]))
     }
 
     /// Read status register 2.
@@ -800,7 +834,8 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     /// This status register is less widely supported and SFDP does
     /// not indicate whether or not it is present.
     pub fn read_status2(&mut self) -> Result<StatusRegister2> {
-        self.exchange(Command::ReadStatusRegister2, &[], 1).map(|data| StatusRegister2(data[0]))
+        self.exchange(Command::ReadStatusRegister2, &[], 1)
+            .map(|data| StatusRegister2(data[0]))
     }
 
     /// Read status register 3.
@@ -808,7 +843,8 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     /// This status register is less widely supported and SFDP does
     /// not indicate whether or not it is present.
     pub fn read_status3(&mut self) -> Result<StatusRegister3> {
-        self.exchange(Command::ReadStatusRegister3, &[], 1).map(|data| StatusRegister3(data[0]))
+        self.exchange(Command::ReadStatusRegister3, &[], 1)
+            .map(|data| StatusRegister3(data[0]))
     }
 
     /// Write status register 1.
@@ -826,10 +862,12 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
                 Some(SFDPStatus1Volatility::Volatile50) => 0x50,
                 Some(SFDPStatus1Volatility::NonVolatile06Volatile50) => 0x06,
                 Some(SFDPStatus1Volatility::Mixed06) => 0x06,
-                _ => if params.legacy_block_protect_volatile {
-                    params.legacy_volatile_write_en_inst
-                } else {
-                    Command::WriteEnable.into()
+                _ => {
+                    if params.legacy_block_protect_volatile {
+                        params.legacy_volatile_write_en_inst
+                    } else {
+                        Command::WriteEnable.into()
+                    }
                 }
             }
         } else {
@@ -888,21 +926,24 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     /// `addr` is always sent as a 24-bit address, regardless of the address_bytes setting.
     pub fn read_sfdp(&mut self, addr: u32, len: usize) -> Result<Vec<u8>> {
         let bytes = addr.to_be_bytes();
-        self.exchange(Command::ReadSFDPRegister, &bytes[1..], 1+len)
+        self.exchange(Command::ReadSFDPRegister, &bytes[1..], 1 + len)
             .map(|data| data[1..].to_vec())
     }
 
     /// Writes `command` and `data` to the flash memory, then returns `nbytes` of response.
-    pub fn exchange<C: Into<u8>>(&mut self, command: C, data: &[u8], nbytes: usize)
-        -> Result<Vec<u8>>
-    {
+    pub fn exchange<C: Into<u8>>(
+        &mut self,
+        command: C,
+        data: &[u8],
+        nbytes: usize,
+    ) -> Result<Vec<u8>> {
         let mut tx = alloc::vec![command.into()];
         tx.extend(data);
         log::trace!("SPI exchange: write {:02X?}, read {} bytes", &tx, nbytes);
         tx.extend(alloc::vec![0u8; nbytes]);
         let rx = self.access.exchange(&tx)?;
-        log::trace!("SPI exchange: read {:02X?}", &rx[1+data.len()..]);
-        Ok(rx[1+data.len()..].to_vec())
+        log::trace!("SPI exchange: read {:02X?}", &rx[1 + data.len()..]);
+        Ok(rx[1 + data.len()..].to_vec())
     }
 
     /// Writes `command` and `data` to the flash memory, without reading the response.
@@ -933,16 +974,22 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
 
         if (end & (max_addr - 1)) < start {
             log::error!("Operation would wrap");
-            Err(Error::InvalidAddress { address: end as u32 })
+            Err(Error::InvalidAddress {
+                address: end as u32,
+            })
         } else if end > max_addr {
             log::error!("Operation would exceed largest address");
-            Err(Error::InvalidAddress { address: end as u32 })
+            Err(Error::InvalidAddress {
+                address: end as u32,
+            })
         } else {
             match self.capacity {
                 Some(capacity) if (end >= capacity) => {
                     log::error!("Operation would exceed flash capacity");
-                    Err(Error::InvalidAddress { address: end as u32 })
-                },
+                    Err(Error::InvalidAddress {
+                        address: end as u32,
+                    })
+                }
                 _ => Ok(()),
             }
         }
@@ -959,7 +1006,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     /// Work out what combination of erase operations to run to efficiently
     /// erase the specified memory.
     fn make_erase_plan(&self, address: u32, length: usize) -> Result<ErasePlan> {
-        log::debug!("Creating erase plan for address={} length={}", address, length);
+        log::debug!(
+            "Creating erase plan for address={} length={}",
+            address,
+            length
+        );
         // Erase instructions: (size in bytes, opcode).
         let mut insts = Vec::new();
 
@@ -1011,9 +1062,12 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     ///
     /// If all those bytes are 0xFF, returns an empty Vec instead, as they won't be changed
     /// by the erase operation.
-    fn read_erase_postamble(&mut self, address: u32, length: usize, plan: &ErasePlan)
-        -> Result<Vec<u8>>
-    {
+    fn read_erase_postamble(
+        &mut self,
+        address: u32,
+        length: usize,
+        plan: &ErasePlan,
+    ) -> Result<Vec<u8>> {
         let (_, size, base, _) = plan.0.last().unwrap();
         let start = address + (length as u32);
         let len = (*base as usize + *size) - start as usize;
@@ -1033,9 +1087,12 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
 
     /// Extend `data` by adding any preamble and postamble required to preserve
     /// existing data after erasing and reprogramming.
-    fn make_restore_data(&mut self, address: u32, data: &[u8], erase_plan: &ErasePlan)
-        -> Result<Vec<u8>>
-    {
+    fn make_restore_data(
+        &mut self,
+        address: u32,
+        data: &[u8],
+        erase_plan: &ErasePlan,
+    ) -> Result<Vec<u8>> {
         let preamble = self.read_erase_preamble(address, &erase_plan)?;
         let postamble = self.read_erase_postamble(address, data.len(), &erase_plan)?;
         let mut full_data = preamble;
@@ -1051,8 +1108,12 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
         let mut total_erased = 0;
         cb(total_erased);
         for (opcode, size, base, duration) in plan.0.iter() {
-            log::trace!("Executing erase plan: Erase 0x{:02X} ({} bytes) from 0x{:08X}",
-                        opcode, size, base);
+            log::trace!(
+                "Executing erase plan: Erase 0x{:02X} ({} bytes) from 0x{:08X}",
+                opcode,
+                size,
+                base
+            );
             let addr = self.make_address(*base);
             self.write_enable()?;
             self.write(*opcode, &addr)?;
@@ -1072,8 +1133,11 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     #[cfg(feature = "std")]
     fn run_erase_plan_progress(&mut self, plan: &ErasePlan) -> Result<()> {
         let erase_size = plan.total_size() as u64;
-        let pb = ProgressBar::new(erase_size).with_style(ProgressStyle::default_bar()
-            .template(Self::DATA_PROGRESS_TPL).progress_chars(Self::DATA_PROGRESS_CHARS));
+        let pb = ProgressBar::new(erase_size).with_style(
+            ProgressStyle::default_bar()
+                .template(Self::DATA_PROGRESS_TPL)
+                .progress_chars(Self::DATA_PROGRESS_CHARS),
+        );
         pb.set_message("Erasing");
         self.run_erase_plan(&plan, |n| pb.set_position(n as u64))?;
         pb.finish();
@@ -1084,17 +1148,29 @@ impl<'a, A: FlashAccess> Flash<'a, A> {
     ///
     /// Returns Err::ReadbackError on mismatch.
     fn verify_readback(&mut self, address: u32, data: &[u8], new_data: &[u8]) -> Result<()> {
-        let mismatch = data.iter().zip(new_data).enumerate().find(|(_, (a, b))| a != b);
+        let mismatch = data
+            .iter()
+            .zip(new_data)
+            .enumerate()
+            .find(|(_, (a, b))| a != b);
         match mismatch {
             Some((idx, (a, b))) => {
                 let addr = address + idx as u32;
-                log::error!("Readback mismatch at 0x{:08X}: Wrote 0x{:02X}, read 0x{:02X}",
-                            addr, a, b);
+                log::error!(
+                    "Readback mismatch at 0x{:08X}: Wrote 0x{:02X}, read 0x{:02X}",
+                    addr,
+                    a,
+                    b
+                );
                 if self.is_protected()? {
                     log::error!("Flash write protection appears to be enabled, try unprotecting.");
                 }
-                Err(Error::ReadbackError { address: addr, wrote: *a, read: *b })
-            },
+                Err(Error::ReadbackError {
+                    address: addr,
+                    wrote: *a,
+                    read: *b,
+                })
+            }
             None => Ok(()),
         }
     }
